@@ -84,7 +84,7 @@ unattended-upgrade --dry-run --verbose || true
 
 echo
 echo "Fertig."
-echo "• Konfiguration: /etc/apt/apt.conf.d/52my-custom-upgrades"
-echo "• Original-Config (inkl. Blacklist): /etc/apt/apt.conf.d/50unattended-upgrades"
-echo "• Rebootzeit: 03:30 (falls nötig)"
+echo "Konfiguration: /etc/apt/apt.conf.d/52my-custom-upgrades"
+echo "Original-Config (inkl. Blacklist): /etc/apt/apt.conf.d/50unattended-upgrades"
+echo "Rebootzeit: 03:30 (falls nötig)"
 
