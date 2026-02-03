@@ -83,7 +83,8 @@ echo "[7/7] Testlauf (Dry-Run)…"
 unattended-upgrade --dry-run --verbose || true
 
 echo
-echo "✅ Fertig."
+echo "Fertig."
 echo "• Konfiguration: /etc/apt/apt.conf.d/52my-custom-upgrades"
 echo "• Original-Config (inkl. Blacklist): /etc/apt/apt.conf.d/50unattended-upgrades"
 echo "• Rebootzeit: 03:30 (falls nötig)"
+
