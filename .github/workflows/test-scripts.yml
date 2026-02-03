@@ -82,8 +82,8 @@ jobs:
               echo "Skipping missing/deleted file: $f"
               continue
             fi
-            echo "chmod +x $f"
-            chmod +x "$f"
+            echo "chmod +x $f (using sudo)"
+            sudo chmod +x "$f"
           done <<< "${{ steps.changed_scripts.outputs.scripts }}"
 
       - name: Lint changed scripts (shellcheck or bash -n)
@@ -126,8 +126,8 @@ jobs:
               continue
             fi
             echo "===================================="
-            echo "Running script: $f"
+            echo "Running script as sudo: $f"
             echo "------------------------------------"
-            bash "$f"
+            sudo bash -o errexit -o nounset -o pipefail "$f"
             echo "Script finished successfully: $f"
           done <<< "${{ steps.changed_scripts.outputs.scripts }}"
