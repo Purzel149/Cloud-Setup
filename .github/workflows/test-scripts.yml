@@ -1,0 +1,133 @@
+name: Test changed scripts
+
+on:
+  push:
+    paths:
+      - "**.sh"
+      - ".github/workflows/test-scripts.yml"
+  pull_request:
+    paths:
+      - "**.sh"
+      - ".github/workflows/test-scripts.yml"
+
+jobs:
+  test-changed-scripts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Nur geänderte / neue .sh-Dateien ermitteln
+      - name: Get list of changed scripts
+        id: changed_scripts
+        run: |
+          set -euo pipefail
+          echo "Detecting changed .sh files..."
+          SCRIPTS=""
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+            # initial commit
+            if [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              git fetch --no-tags --depth=1 origin "$HEAD_SHA" || true
+              SCRIPTS=$(git show --name-only --pretty="" "$HEAD_SHA" | grep '\.sh$' || true)
+            else
+              git fetch --no-tags --depth=2 origin || true
+              SCRIPTS=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep '\.sh$' || true)
+            fi
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}" --depth=1 || true
+            SCRIPTS=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep '\.sh$' || true)
+          else
+            SCRIPTS=""
+          fi
+
+          echo "Changed scripts (raw):"
+          echo "$SCRIPTS"
+
+          # Remove non-existing files (deleted in this commit/PR)
+          FILTERED=$(printf '%s\n' "$SCRIPTS" | while IFS= read -r f; do [ -n "$f" ] && [ -f "$f" ] && printf '%s\n' "$f"; done)
+
+          if [ -z "$FILTERED" ]; then
+            echo "No changed .sh files found."
+            echo "scripts=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Changed scripts (filtered):"
+            printf '%s\n' "$FILTERED"
+            # Multi-line output (safe for filenames that contain commas)
+            echo "scripts<<EOF" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "$FILTERED" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Wenn keine Skripte geändert wurden, Job sauber beenden
+      - name: Stop if no scripts changed
+        if: ${{ steps.changed_scripts.outputs.scripts == '' }}
+        run: |
+          echo "No changed .sh scripts found. Nothing to test."
+          exit 0
+
+      - name: Make changed scripts executable
+        run: |
+          set -euo pipefail
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ ! -f "$f" ]; then
+              echo "Skipping missing/deleted file: $f"
+              continue
+            fi
+            echo "chmod +x $f"
+            chmod +x "$f"
+          done <<< "${{ steps.changed_scripts.outputs.scripts }}"
+
+      - name: Lint changed scripts (shellcheck or bash -n)
+        run: |
+          set -euo pipefail
+          SCRIPTS="${{ steps.changed_scripts.outputs.scripts }}"
+          if [ -z "$SCRIPTS" ]; then
+            echo "No scripts to lint."
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y shellcheck || true
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ ! -f "$f" ]; then
+              echo "Skipping missing $f"
+              continue
+            fi
+            if command -v shellcheck >/dev/null 2>&1; then
+              echo "Running shellcheck on $f"
+              shellcheck -x "$f"
+            else
+              echo "shellcheck not available, running 'bash -n' for basic syntax check on $f"
+              bash -n "$f"
+            fi
+          done <<< "$SCRIPTS"
+
+      - name: Install basic dependencies (optional)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl git
+
+      - name: Run changed scripts
+        run: |
+          set -euo pipefail
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ ! -f "$f" ]; then
+              echo "Skipping missing/deleted file: $f"
+              continue
+            fi
+            echo "===================================="
+            echo "Running script: $f"
+            echo "------------------------------------"
+            bash "$f"
+            echo "Script finished successfully: $f"
+          done <<< "${{ steps.changed_scripts.outputs.scripts }}"
