@@ -6,8 +6,6 @@ on:
       - "**.sh"
       - ".github/workflows/test-scripts.yml"
   push:
-    branches:
-      - main
     paths:
       - "**.sh"
       - ".github/workflows/test-scripts.yml"
