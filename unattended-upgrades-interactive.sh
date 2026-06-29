@@ -50,9 +50,14 @@ validate_non_negative_int() {
   [[ "$value" =~ ^[0-9]+$ ]]
 }
 
+validate_no_newline() {
+  local value="$1"
+  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]]
+}
+
 validate_oncalendar() {
   local value="$1"
-  if [[ -z "$value" ]]; then
+  if [[ -z "$value" ]] || ! validate_no_newline "$value"; then
     return 1
   fi
 
@@ -62,7 +67,7 @@ validate_oncalendar() {
   fi
 
   # Fallback without systemd-analyze: at least ensure a simple date/time-like pattern.
-  [[ "$value" =~ [0-9\*]+-[0-9\*]+-[0-9\*]+[[:space:]]+[0-9\*]+:[0-9\*]+ ]]
+  [[ "$value" =~ ^[0-9\*]+-[0-9\*]+-[0-9\*]+[[:space:]]+[0-9\*]+:[0-9\*]+$ ]]
 }
 
 ask_user_values() {
