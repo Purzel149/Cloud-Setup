@@ -40,6 +40,14 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban
 
 echo "[2/4] SSH-Jail konfigurieren..."
+
+for var in "$MAXRETRY" "$FINDTIME" "$BANTIME" "$SSH_PORT"; do
+  if [[ "$var" == *$'\n'* ]] || [[ "$var" == *$'\r'* ]]; then
+    echo "Fehler: Konfigurationsparameter duerfen keine Zeilenumbrueche enthalten (Security)." >&2
+    exit 1
+  fi
+done
+
 mkdir -p /etc/fail2ban/jail.d
 cat > /etc/fail2ban/jail.d/sshd.local <<EOF
 [sshd]
