@@ -22,6 +22,7 @@ UPGRADE_ONCALENDAR="${UPGRADE_ONCALENDAR:-$DEFAULT_UPGRADE_ONCALENDAR}"
 RANDOM_DELAY_SEC="${RANDOM_DELAY_SEC:-$DEFAULT_RANDOM_DELAY_SEC}"
 AUTOCLEAN_INTERVAL_DAYS="${AUTOCLEAN_INTERVAL_DAYS:-$DEFAULT_AUTOCLEAN_INTERVAL_DAYS}"
 LOGROTATE_DAYS="${LOGROTATE_DAYS:-$DEFAULT_LOGROTATE_DAYS}"
+BACKUP_DIR="/root/cloud-setup-backups/unattended-upgrades-interactive/$(date +%Y%m%d-%H%M%S)"
 
 prompt_with_default() {
   local label="$1"
@@ -68,6 +69,24 @@ validate_oncalendar() {
 
   # Fallback without systemd-analyze: at least ensure a simple date/time-like pattern.
   [[ "$value" =~ ^[0-9\*]+-[0-9\*]+-[0-9\*]+[[:space:]]+[0-9\*]+:[0-9\*]+$ ]]
+}
+
+prepare_backup_dir() {
+  install -d -m 0700 "$BACKUP_DIR"
+}
+
+backup_file() {
+  local file="$1"
+  local backup_file
+
+  if [[ ! -e "$file" ]]; then
+    return
+  fi
+
+  backup_file="${BACKUP_DIR}${file}"
+  mkdir -p "$(dirname "$backup_file")"
+  cp -a "$file" "$backup_file"
+  echo "Backup erstellt: ${backup_file}"
 }
 
 ask_user_values() {
@@ -156,6 +175,8 @@ fi
 
 ask_user_values
 
+prepare_backup_dir
+
 echo "[1/7] Pakete installieren..."
 apt-get update
 # -o Dpkg::Options::="--force-confold" sorgt dafür, dass bestehende Configs nicht kommentarlos überschrieben werden
@@ -167,6 +188,7 @@ systemctl enable unattended-upgrades
 
 echo "[3/7] Auto-Upgrades aktivieren..."
 # Diese Datei aktiviert den Timer. Hier ist überschreiben okay.
+backup_file /etc/apt/apt.conf.d/20auto-upgrades
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<EOF
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
@@ -176,6 +198,7 @@ EOF
 echo "[4/7] Custom-Config schreiben (Blacklists bleiben erhalten!)..."
 # WICHTIG: Wir schreiben in '52my-custom...', damit '50unattended-upgrades' (wo die Blacklists und Origins liegen)
 # nicht angefasst wird. Unsere Einstellungen überschreiben die Defaults nur dort, wo wir es wollen.
+backup_file /etc/apt/apt.conf.d/52my-custom-upgrades
 cat > /etc/apt/apt.conf.d/52my-custom-upgrades <<EOF
 // Eigene Anpassungen - überschreibt Defaults aus 50unattended-upgrades
 Unattended-Upgrade::Automatic-Reboot "true";
@@ -192,6 +215,7 @@ EOF
 
 echo "[5/7] systemd Timer anpassen (mit Random Delay)..."
 mkdir -p /etc/systemd/system/apt-daily-upgrade.timer.d
+backup_file /etc/systemd/system/apt-daily-upgrade.timer.d/override.conf
 cat > /etc/systemd/system/apt-daily-upgrade.timer.d/override.conf <<EOF
 [Timer]
 OnCalendar=
@@ -206,6 +230,7 @@ systemctl restart apt-daily.timer apt-daily-upgrade.timer
 
 echo "[6/7] Logrotation konfigurieren..."
 # Hier müssen wir die Datei überschreiben, da es keine "Include"-Logik für Logrotate-Konfigs gibt wie bei APT
+backup_file /etc/logrotate.d/unattended-upgrades
 cat > /etc/logrotate.d/unattended-upgrades <<EOF
 /var/log/unattended-upgrades/*.log {
     daily
@@ -227,6 +252,7 @@ unattended-upgrade --dry-run --verbose || true
 
 echo
 echo "Fertig."
+echo "Backup-Verzeichnis: ${BACKUP_DIR}"
 echo "Konfiguration: /etc/apt/apt.conf.d/52my-custom-upgrades"
 echo "Original-Config (inkl. Blacklist): /etc/apt/apt.conf.d/50unattended-upgrades"
 echo "Rebootzeit: ${REBOOT_TIME} (falls nötig)"

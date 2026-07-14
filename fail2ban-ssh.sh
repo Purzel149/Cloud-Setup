@@ -5,11 +5,33 @@ set -euo pipefail
 # - Installs fail2ban
 # - Enables only the sshd jail
 # - Keeps the configuration in a separate local override file
+# - Logs bans to /var/log/fail2ban.log
+# - Rotates logs weekly and keeps 8 weeks
 
 MAXRETRY="${MAXRETRY:-5}"
 FINDTIME="${FINDTIME:-10m}"
 BANTIME="${BANTIME:-1h}"
 SSH_PORT="${SSH_PORT:-ssh}"
+LOG_TARGET="${LOG_TARGET:-/var/log/fail2ban.log}"
+BACKUP_DIR="/root/cloud-setup-backups/fail2ban-ssh/$(date +%Y%m%d-%H%M%S)"
+
+prepare_backup_dir() {
+  install -d -m 0700 "$BACKUP_DIR"
+}
+
+backup_file() {
+  local file="$1"
+  local backup_file
+
+  if [[ ! -e "$file" ]]; then
+    return
+  fi
+
+  backup_file="${BACKUP_DIR}${file}"
+  mkdir -p "$(dirname "$backup_file")"
+  cp -a "$file" "$backup_file"
+  echo "Backup erstellt: ${backup_file}"
+}
 
 if [[ $EUID -ne 0 ]]; then
   echo "Bitte als root ausführen: sudo bash $0"
@@ -35,20 +57,39 @@ if [[ -r /etc/os-release ]]; then
   fi
 fi
 
-echo "[1/4] Pakete installieren..."
+echo "[1/5] Pakete installieren..."
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban
+DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban logrotate
 
-echo "[2/4] SSH-Jail konfigurieren..."
+echo "[2/5] Logging und SSH-Jail konfigurieren..."
 
-for var in "$MAXRETRY" "$FINDTIME" "$BANTIME" "$SSH_PORT"; do
+for var in "$MAXRETRY" "$FINDTIME" "$BANTIME" "$SSH_PORT" "$LOG_TARGET"; do
   if [[ "$var" == *$'\n'* ]] || [[ "$var" == *$'\r'* ]]; then
     echo "Fehler: Konfigurationsparameter duerfen keine Zeilenumbrueche enthalten (Security)." >&2
     exit 1
   fi
 done
 
+if [[ "$LOG_TARGET" != /* ]]; then
+  echo "Fehler: LOG_TARGET muss ein absoluter Pfad sein." >&2
+  exit 1
+fi
+
+if [[ ! "$LOG_TARGET" =~ ^/[A-Za-z0-9._/+:-]+$ ]]; then
+  echo "Fehler: LOG_TARGET darf nur einfache Pfadzeichen enthalten." >&2
+  exit 1
+fi
+
 mkdir -p /etc/fail2ban/jail.d
+prepare_backup_dir
+backup_file /etc/fail2ban/fail2ban.local
+backup_file /etc/fail2ban/jail.d/sshd.local
+cat > /etc/fail2ban/fail2ban.local <<EOF
+[Definition]
+loglevel = INFO
+logtarget = ${LOG_TARGET}
+EOF
+
 cat > /etc/fail2ban/jail.d/sshd.local <<EOF
 [sshd]
 enabled = true
@@ -58,14 +99,38 @@ findtime = ${FINDTIME}
 bantime = ${BANTIME}
 EOF
 
-echo "[3/4] Fail2ban aktivieren und starten..."
+echo "[3/5] Logrotation konfigurieren..."
+backup_file /etc/logrotate.d/fail2ban
+cat > /etc/logrotate.d/fail2ban <<EOF
+${LOG_TARGET} {
+    weekly
+    rotate 8
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 640 root adm
+    sharedscripts
+    postrotate
+        fail2ban-client flushlogs >/dev/null 2>&1 || true
+    endscript
+}
+EOF
+
+logrotate --debug /etc/logrotate.d/fail2ban >/dev/null
+
+echo "[4/5] Fail2ban aktivieren und starten..."
 systemctl enable --now fail2ban
 systemctl restart fail2ban
 
-echo "[4/4] Konfiguration prüfen..."
+echo "[5/5] Konfiguration prüfen..."
 fail2ban-client status sshd || true
 
 echo
 echo "Fertig."
+echo "Backup-Verzeichnis: ${BACKUP_DIR}"
 echo "Konfiguration: /etc/fail2ban/jail.d/sshd.local"
+echo "Logging: ${LOG_TARGET}"
+echo "Geblockte IPs im Log finden: grep ' Ban ' ${LOG_TARGET}"
+echo "Logrotation: /etc/logrotate.d/fail2ban (weekly, rotate 8)"
 echo "Parameter: port=${SSH_PORT}, maxretry=${MAXRETRY}, findtime=${FINDTIME}, bantime=${BANTIME}"
