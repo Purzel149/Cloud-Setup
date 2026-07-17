@@ -64,6 +64,28 @@ else
 fi
 
 echo "[2/4] Report-Verzeichnis vorbereiten..."
+# Security validation for REPORT_DIR to prevent arbitrary permission changes
+if [[ ! "$REPORT_DIR" = /* ]]; then
+  echo "Fehler: REPORT_DIR muss ein absoluter Pfad sein."
+  exit 1
+fi
+
+if [[ "$REPORT_DIR" == *..* ]]; then
+  echo "Fehler: REPORT_DIR darf keine '..' enthalten."
+  exit 1
+fi
+
+# Resolve canonical path to be absolutely sure
+REAL_DIR="$(readlink -m "$REPORT_DIR")"
+
+# Must be inside /var/log or /tmp, and cannot be exactly /var/log, /tmp, or /
+if [[ "$REAL_DIR" != /var/log/* && "$REAL_DIR" != /tmp/* ]]; then
+  echo "Fehler: REPORT_DIR muss ein Unterverzeichnis von /var/log oder /tmp sein."
+  exit 1
+fi
+
+REPORT_DIR="$REAL_DIR"
+
 mkdir -p "$REPORT_DIR"
 chmod 750 "$REPORT_DIR"
 
