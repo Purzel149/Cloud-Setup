@@ -121,6 +121,7 @@ echo "[3/5] Logrotation konfigurieren..."
 backup_file /etc/logrotate.d/fail2ban
 cat > /etc/logrotate.d/fail2ban <<EOF
 ${LOG_TARGET} {
+    su root adm
     weekly
     rotate 8
     missingok
