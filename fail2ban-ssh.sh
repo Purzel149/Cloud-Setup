@@ -63,12 +63,30 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban logrotate
 
 echo "[2/5] Logging und SSH-Jail konfigurieren..."
 
-for var in "$MAXRETRY" "$FINDTIME" "$BANTIME" "$SSH_PORT" "$LOG_TARGET"; do
-  if [[ "$var" == *$'\n'* ]] || [[ "$var" == *$'\r'* ]]; then
-    echo "Fehler: Konfigurationsparameter duerfen keine Zeilenumbrueche enthalten (Security)." >&2
-    exit 1
-  fi
-done
+if ! [[ "$MAXRETRY" =~ ^[0-9]+$ ]]; then
+  echo "Fehler: MAXRETRY ungueltig (Security)." >&2
+  exit 1
+fi
+
+if ! [[ "$FINDTIME" =~ ^[0-9]+[a-zA-Z]*$ ]]; then
+  echo "Fehler: FINDTIME ungueltig (Security)." >&2
+  exit 1
+fi
+
+if ! [[ "$BANTIME" =~ ^-?[0-9]+[a-zA-Z]*$ ]]; then
+  echo "Fehler: BANTIME ungueltig (Security)." >&2
+  exit 1
+fi
+
+if ! [[ "$SSH_PORT" =~ ^[a-zA-Z0-9,]+$ ]]; then
+  echo "Fehler: SSH_PORT ungueltig (Security)." >&2
+  exit 1
+fi
+
+if [[ "$LOG_TARGET" == *$'\n'* ]] || [[ "$LOG_TARGET" == *$'\r'* ]]; then
+  echo "Fehler: LOG_TARGET darf keine Zeilenumbrueche enthalten (Security)." >&2
+  exit 1
+fi
 
 if [[ "$LOG_TARGET" != /* ]]; then
   echo "Fehler: LOG_TARGET muss ein absoluter Pfad sein." >&2
