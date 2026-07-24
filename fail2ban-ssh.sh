@@ -129,6 +129,7 @@ ${LOG_TARGET} {
     compress
     delaycompress
     create 640 root adm
+    su root adm
     sharedscripts
     postrotate
         fail2ban-client flushlogs >/dev/null 2>&1 || true
