@@ -52,15 +52,25 @@ jobs:
           echo "Changed scripts (raw):"
           echo "$SCRIPTS"
 
-          # Remove non-existing files (deleted in this commit/PR)
-          FILTERED=$(printf '%s\n' "$SCRIPTS" | while IFS= read -r f; do [ -n "$f" ] && [ -f "$f" ] && printf '%s\n' "$f"; done)
+          # Remove non-existing files (deleted in this commit/PR).
+          # Keep the loop successful when the input is empty so that `set -e`
+          # does not terminate this step before the no-change case is handled.
+          FILTERED=$(
+            while IFS= read -r f; do
+              if [ -n "$f" ] && [ -f "$f" ]; then
+                printf '%s\n' "$f"
+              fi
+            done <<< "$SCRIPTS"
+          )
 
           if [ -z "$FILTERED" ]; then
             echo "No changed .sh files found."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "scripts=" >> "$GITHUB_OUTPUT"
           else
             echo "Changed scripts (filtered):"
             printf '%s\n' "$FILTERED"
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
             # Multi-line output (safe for filenames that contain commas)
             echo "scripts<<EOF" >> "$GITHUB_OUTPUT"
             printf '%s\n' "$FILTERED" >> "$GITHUB_OUTPUT"
@@ -69,11 +79,11 @@ jobs:
 
       # Wenn keine Skripte geändert wurden, Job sauber beenden
       - name: No scripts changed – skipping
-        if: steps.changed_scripts.outputs.scripts == ''
+        if: steps.changed_scripts.outputs.has_changes != 'true'
         run: echo "No changed .sh scripts found. Skipping all remaining steps."
 
       - name: Make changed scripts executable
-        if: steps.changed_scripts.outputs.scripts != ''
+        if: steps.changed_scripts.outputs.has_changes == 'true'
         run: |
           set -euo pipefail
           while IFS= read -r f; do
@@ -87,7 +97,7 @@ jobs:
           done <<< "${{ steps.changed_scripts.outputs.scripts }}"
 
       - name: Lint changed scripts (shellcheck or bash -n)
-        if: steps.changed_scripts.outputs.scripts != ''
+        if: steps.changed_scripts.outputs.has_changes == 'true'
         run: |
           set -euo pipefail
           SCRIPTS="${{ steps.changed_scripts.outputs.scripts }}"
@@ -113,13 +123,13 @@ jobs:
           done <<< "$SCRIPTS"
 
       - name: Install basic dependencies (optional)
-        if: steps.changed_scripts.outputs.scripts != ''
+        if: steps.changed_scripts.outputs.has_changes == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y curl git
 
       - name: Run changed scripts
-        if: steps.changed_scripts.outputs.scripts != ''
+        if: steps.changed_scripts.outputs.has_changes == 'true'
         run: |
           set -euo pipefail
           while IFS= read -r f; do
