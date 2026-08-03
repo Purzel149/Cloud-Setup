@@ -430,8 +430,7 @@ apply_changes() {
   local ssh_service dropin_backup=""
   ssh_service="$(detect_ssh_service)"
 
-  mkdir -p "$BACKUP_DIR"
-  chmod 700 "$BACKUP_DIR"
+  install -d -m 0700 "$BACKUP_DIR"
 
   ensure_dropin_include
 
