@@ -460,7 +460,7 @@ apply_changes() {
   fi
 
   echo "Lade SSH neu..."
-  systemctl reload "$ssh_service"
+  systemctl reload "$ssh_service" || systemctl restart "$ssh_service" || echo "Warnung: SSH-Service konnte nicht neu geladen/gestartet werden."
 
   echo
   echo "Fertig."
