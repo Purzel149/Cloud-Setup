@@ -423,6 +423,7 @@ test_sshd_config() {
     return 1
   fi
 
+  mkdir -p /run/sshd
   "$sshd_bin" -t
 }
 
