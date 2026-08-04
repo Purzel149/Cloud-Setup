@@ -423,6 +423,7 @@ test_sshd_config() {
     return 1
   fi
 
+  mkdir -p /run/sshd
   "$sshd_bin" -t
 }
 
@@ -430,8 +431,7 @@ apply_changes() {
   local ssh_service dropin_backup=""
   ssh_service="$(detect_ssh_service)"
 
-  mkdir -p "$BACKUP_DIR"
-  chmod 700 "$BACKUP_DIR"
+  install -d -m 0700 "$BACKUP_DIR"
 
   ensure_dropin_include
 
@@ -460,7 +460,11 @@ apply_changes() {
   fi
 
   echo "Lade SSH neu..."
-  systemctl reload "$ssh_service"
+  if systemctl is-active --quiet "$ssh_service"; then
+    systemctl reload "$ssh_service" || systemctl restart "$ssh_service" || echo "Warnung: SSH-Service konnte nicht neu geladen/gestartet werden."
+  else
+    systemctl start "$ssh_service" || echo "Warnung: SSH-Service konnte nicht gestartet werden."
+  fi
 
   echo
   echo "Fertig."
