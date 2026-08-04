@@ -461,7 +461,7 @@ apply_changes() {
   fi
 
   echo "Lade SSH neu..."
-  systemctl reload "$ssh_service"
+  systemctl reload "$ssh_service" || true
 
   echo
   echo "Fertig."
