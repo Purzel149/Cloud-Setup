@@ -10,6 +10,9 @@ on:
       - "**.sh"
       - ".github/workflows/test-scripts.yml"
 
+permissions:
+  contents: read
+
 jobs:
   test-changed-scripts:
     runs-on: ubuntu-latest
