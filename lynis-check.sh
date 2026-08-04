@@ -86,8 +86,7 @@ fi
 
 REPORT_DIR="$REAL_DIR"
 
-mkdir -p "$REPORT_DIR"
-chmod 750 "$REPORT_DIR"
+install -d -m 750 "$REPORT_DIR"
 
 echo "[3/4] Lynis Audit ausführen..."
 set +e
