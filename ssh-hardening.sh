@@ -423,7 +423,6 @@ test_sshd_config() {
     return 1
   fi
 
-  mkdir -p /run/sshd
   "$sshd_bin" -t
 }
 
@@ -461,7 +460,7 @@ apply_changes() {
   fi
 
   echo "Lade SSH neu..."
-  systemctl reload "$ssh_service" || true
+  systemctl reload "$ssh_service"
 
   echo
   echo "Fertig."
