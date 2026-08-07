@@ -1,0 +1,117 @@
+name: Shell script checks
+
+on:
+  push:
+    paths:
+      - "**.sh"
+      - ".github/workflows/check-shell-scripts.yml"
+  pull_request:
+    paths:
+      - "**.sh"
+      - ".github/workflows/check-shell-scripts.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check-changed-scripts:
+    name: Check changed shell scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect and check changed scripts
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          changed_file="$(mktemp)"
+          tree_file="$(mktemp)"
+          trap 'rm -f -- "$changed_file" "$tree_file"' EXIT
+
+          require_commit() {
+            local commit="$1"
+            git cat-file -e "${commit}^{commit}" 2>/dev/null || {
+              echo "Required commit is unavailable: ${commit}" >&2
+              exit 1
+            }
+          }
+
+          case "$EVENT_NAME" in
+            push)
+              require_commit "$PUSH_HEAD_SHA"
+              if [[ "$PUSH_BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+                git ls-tree -r --name-only -z "$PUSH_HEAD_SHA" > "$tree_file"
+                while IFS= read -r -d '' path; do
+                  if [[ "$path" == *.sh ]]; then
+                    printf '%s\0' "$path"
+                  fi
+                done < "$tree_file" > "$changed_file"
+              else
+                require_commit "$PUSH_BASE_SHA"
+                git diff --find-renames --name-only --diff-filter=ACMR -z \
+                  "$PUSH_BASE_SHA" "$PUSH_HEAD_SHA" -- '*.sh' > "$changed_file"
+              fi
+              ;;
+            pull_request)
+              require_commit "$PR_BASE_SHA"
+              require_commit "$PR_HEAD_SHA"
+              git diff --find-renames --name-only --diff-filter=ACMR -z \
+                "$PR_BASE_SHA" "$PR_HEAD_SHA" -- '*.sh' > "$changed_file"
+              ;;
+            *)
+              echo "Unsupported event: ${EVENT_NAME}" >&2
+              exit 1
+              ;;
+          esac
+
+          scripts=()
+          mapfile -d '' -t scripts < "$changed_file"
+
+          if (( ${#scripts[@]} == 0 )); then
+            echo "No added, copied, modified, or renamed shell scripts found."
+            exit 0
+          fi
+
+          command -v shellcheck >/dev/null 2>&1 || {
+            echo "ShellCheck is unavailable on this runner." >&2
+            exit 1
+          }
+
+          for script in "${scripts[@]}"; do
+            printf 'Checking %q\n' "$script"
+
+            [[ -f "$script" ]] || {
+              echo "Changed script is not a regular file: ${script}" >&2
+              exit 1
+            }
+            [[ -x "$script" ]] || {
+              echo "Script is not executable in Git: ${script}" >&2
+              exit 1
+            }
+
+            IFS= read -r shebang < "$script" || true
+            case "$shebang" in
+              '#!/usr/bin/env bash'|'#!/bin/bash') ;;
+              *)
+                echo "Unsupported or missing Bash shebang in ${script}: ${shebang}" >&2
+                exit 1
+                ;;
+            esac
+
+            bash -n "$script"
+            shellcheck -x "$script"
+          done
+
+          echo "All ${#scripts[@]} changed shell script(s) passed."
