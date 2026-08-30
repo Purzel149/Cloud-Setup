@@ -15,6 +15,9 @@ set -euo pipefail
 #   RANDOM_DELAY_SEC="900"
 #   AUTOCLEAN_INTERVAL_DAYS="7"
 #   LOGROTATE_DAYS="30"
+#   APT_LOCK_TIMEOUT_SEC="120"
+#   APT_NETWORK_TIMEOUT_SEC="30"
+#   APT_COMMAND_TIMEOUT_SEC="900"
 
 ENABLE_AUTOMATIC_REBOOT="${ENABLE_AUTOMATIC_REBOOT:-true}"
 REBOOT_TIME="${REBOOT_TIME:-03:30}"
@@ -22,6 +25,9 @@ UPGRADE_ONCALENDAR="${UPGRADE_ONCALENDAR:-*-*-* 00:00}"
 RANDOM_DELAY_SEC="${RANDOM_DELAY_SEC:-900}"
 AUTOCLEAN_INTERVAL_DAYS="${AUTOCLEAN_INTERVAL_DAYS:-7}"
 LOGROTATE_DAYS="${LOGROTATE_DAYS:-30}"
+APT_LOCK_TIMEOUT_SEC="${APT_LOCK_TIMEOUT_SEC:-120}"
+APT_NETWORK_TIMEOUT_SEC="${APT_NETWORK_TIMEOUT_SEC:-30}"
+APT_COMMAND_TIMEOUT_SEC="${APT_COMMAND_TIMEOUT_SEC:-900}"
 BACKUP_DIR="/root/cloud-setup-backups/unattended-upgrades/$(date +%Y%m%d-%H%M%S)"
 
 validate_bool() {
@@ -100,6 +106,15 @@ validate_settings() {
     echo "Erlaubt: ganze Zahl > 0"
     exit 1
   fi
+
+  for setting_name in APT_LOCK_TIMEOUT_SEC APT_NETWORK_TIMEOUT_SEC APT_COMMAND_TIMEOUT_SEC; do
+    local setting_value="${!setting_name}"
+    if ! validate_no_newline "$setting_value" || ! validate_positive_int "$setting_value"; then
+      echo "Ungültiger Wert für ${setting_name}: ${setting_value}"
+      echo "Erlaubt: ganze Zahl > 0"
+      exit 1
+    fi
+  done
 }
 
 prepare_backup_dir() {
@@ -120,6 +135,32 @@ backup_file() {
   echo "Backup erstellt: ${backup_file}"
 }
 
+run_apt() {
+  local action="$1"
+  shift
+
+  # APT may wait forever for a lock or a stalled repository connection.  Do not
+  # kill another APT process: wait a bounded time, then fail with a clear error.
+  if timeout --signal=TERM --kill-after=30s "${APT_COMMAND_TIMEOUT_SEC}s" \
+    apt-get \
+      -o "DPkg::Lock::Timeout=${APT_LOCK_TIMEOUT_SEC}" \
+      -o "APT::Get::Lock-Timeout=${APT_LOCK_TIMEOUT_SEC}" \
+      -o "Acquire::http::Timeout=${APT_NETWORK_TIMEOUT_SEC}" \
+      -o "Acquire::https::Timeout=${APT_NETWORK_TIMEOUT_SEC}" \
+      "$@"; then
+    return 0
+  else
+    local status=$?
+    if [[ $status -eq 124 || $status -eq 137 ]]; then
+      echo "APT ${action} hat das Zeitlimit von ${APT_COMMAND_TIMEOUT_SEC}s überschritten."
+    else
+      echo "APT ${action} ist fehlgeschlagen (Exit-Code ${status})."
+    fi
+    echo "Falls ein anderer APT-Prozess aktiv ist, dessen Abschluss abwarten und erneut starten."
+    exit "$status"
+  fi
+}
+
 if [[ $EUID -ne 0 ]]; then
   echo "Bitte als root ausführen: sudo bash $0"
   exit 1
@@ -132,6 +173,11 @@ fi
 
 if ! command -v systemctl >/dev/null 2>&1; then
   echo "Dieses Skript benötigt systemd (systemctl nicht gefunden)."
+  exit 1
+fi
+
+if ! command -v timeout >/dev/null 2>&1; then
+  echo "Dieses Skript benötigt 'timeout' aus coreutils."
   exit 1
 fi
 
@@ -148,9 +194,9 @@ validate_settings
 prepare_backup_dir
 
 echo "[1/7] Pakete installieren..."
-apt-get update
+run_apt "update" update
 # -o Dpkg::Options::="--force-confold" sorgt dafür, dass bestehende Configs nicht kommentarlos überschrieben werden
-DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-confold" unattended-upgrades apt-listchanges needrestart logrotate
+DEBIAN_FRONTEND=noninteractive run_apt "installation" install -y -o Dpkg::Options::="--force-confold" unattended-upgrades apt-listchanges needrestart logrotate
 
 echo "[2/7] unattended-upgrades aktivieren..."
 # Wir erzwingen hier keine Neukonfiguration, um Defaults der Distro zu wahren
