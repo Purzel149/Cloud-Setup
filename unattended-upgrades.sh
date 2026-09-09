@@ -17,7 +17,6 @@ set -euo pipefail
 #   LOGROTATE_DAYS="30"
 #   APT_LOCK_TIMEOUT_SEC="120"
 #   APT_NETWORK_TIMEOUT_SEC="30"
-#   APT_COMMAND_TIMEOUT_SEC="900"
 
 ENABLE_AUTOMATIC_REBOOT="${ENABLE_AUTOMATIC_REBOOT:-true}"
 REBOOT_TIME="${REBOOT_TIME:-03:30}"
@@ -27,7 +26,6 @@ AUTOCLEAN_INTERVAL_DAYS="${AUTOCLEAN_INTERVAL_DAYS:-7}"
 LOGROTATE_DAYS="${LOGROTATE_DAYS:-30}"
 APT_LOCK_TIMEOUT_SEC="${APT_LOCK_TIMEOUT_SEC:-120}"
 APT_NETWORK_TIMEOUT_SEC="${APT_NETWORK_TIMEOUT_SEC:-30}"
-APT_COMMAND_TIMEOUT_SEC="${APT_COMMAND_TIMEOUT_SEC:-900}"
 BACKUP_DIR="/root/cloud-setup-backups/unattended-upgrades/$(date +%Y%m%d-%H%M%S)"
 
 validate_bool() {
@@ -107,7 +105,7 @@ validate_settings() {
     exit 1
   fi
 
-  for setting_name in APT_LOCK_TIMEOUT_SEC APT_NETWORK_TIMEOUT_SEC APT_COMMAND_TIMEOUT_SEC; do
+  for setting_name in APT_LOCK_TIMEOUT_SEC APT_NETWORK_TIMEOUT_SEC; do
     local setting_value="${!setting_name}"
     if ! validate_no_newline "$setting_value" || ! validate_positive_int "$setting_value"; then
       echo "Ungültiger Wert für ${setting_name}: ${setting_value}"
@@ -139,10 +137,9 @@ run_apt() {
   local action="$1"
   shift
 
-  # APT may wait forever for a lock or a stalled repository connection.  Do not
-  # kill another APT process: wait a bounded time, then fail with a clear error.
-  if timeout --signal=TERM --kill-after=30s "${APT_COMMAND_TIMEOUT_SEC}s" \
-    apt-get \
+  # APT timeouts are handled natively by APT config options below.
+  # We do not forcefully kill apt-get, as doing so while dpkg is running can corrupt the package database.
+  if apt-get \
       -o "DPkg::Lock::Timeout=${APT_LOCK_TIMEOUT_SEC}" \
       -o "APT::Get::Lock-Timeout=${APT_LOCK_TIMEOUT_SEC}" \
       -o "Acquire::http::Timeout=${APT_NETWORK_TIMEOUT_SEC}" \
@@ -151,11 +148,7 @@ run_apt() {
     return 0
   else
     local status=$?
-    if [[ $status -eq 124 || $status -eq 137 ]]; then
-      echo "APT ${action} hat das Zeitlimit von ${APT_COMMAND_TIMEOUT_SEC}s überschritten."
-    else
-      echo "APT ${action} ist fehlgeschlagen (Exit-Code ${status})."
-    fi
+    echo "APT ${action} ist fehlgeschlagen (Exit-Code ${status})."
     echo "Falls ein anderer APT-Prozess aktiv ist, dessen Abschluss abwarten und erneut starten."
     exit "$status"
   fi
@@ -198,7 +191,14 @@ run_apt "update" update
 # -o Dpkg::Options::="--force-confold" sorgt dafür, dass bestehende Configs nicht kommentarlos überschrieben werden
 DEBIAN_FRONTEND=noninteractive run_apt "installation" install -y -o Dpkg::Options::="--force-confold" unattended-upgrades apt-listchanges needrestart logrotate
 
-echo "[2/7] unattended-upgrades aktivieren..."
+echo "[2/7] needrestart & unattended-upgrades konfigurieren..."
+# Services nach Updates automatisch neustarten (verhindert interaktive Prompts)
+mkdir -p /etc/needrestart/conf.d
+backup_file /etc/needrestart/conf.d/99-auto-restart.conf
+cat > /etc/needrestart/conf.d/99-auto-restart.conf <<EOF
+\$nrconf{restart} = 'a';
+EOF
+
 # Wir erzwingen hier keine Neukonfiguration, um Defaults der Distro zu wahren
 systemctl enable unattended-upgrades
 
