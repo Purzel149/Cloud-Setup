@@ -17,6 +17,7 @@ set -euo pipefail
 #   LOGROTATE_DAYS="30"
 #   APT_LOCK_TIMEOUT_SEC="120"
 #   APT_NETWORK_TIMEOUT_SEC="30"
+#   DRYRUN_TIMEOUT_SEC="600"
 
 ENABLE_AUTOMATIC_REBOOT="${ENABLE_AUTOMATIC_REBOOT:-true}"
 REBOOT_TIME="${REBOOT_TIME:-03:30}"
@@ -26,6 +27,7 @@ AUTOCLEAN_INTERVAL_DAYS="${AUTOCLEAN_INTERVAL_DAYS:-7}"
 LOGROTATE_DAYS="${LOGROTATE_DAYS:-30}"
 APT_LOCK_TIMEOUT_SEC="${APT_LOCK_TIMEOUT_SEC:-120}"
 APT_NETWORK_TIMEOUT_SEC="${APT_NETWORK_TIMEOUT_SEC:-30}"
+DRYRUN_TIMEOUT_SEC="${DRYRUN_TIMEOUT_SEC:-600}"
 BACKUP_DIR="/root/cloud-setup-backups/unattended-upgrades/$(date +%Y%m%d-%H%M%S)"
 
 validate_bool() {
@@ -105,7 +107,7 @@ validate_settings() {
     exit 1
   fi
 
-  for setting_name in APT_LOCK_TIMEOUT_SEC APT_NETWORK_TIMEOUT_SEC; do
+  for setting_name in APT_LOCK_TIMEOUT_SEC APT_NETWORK_TIMEOUT_SEC DRYRUN_TIMEOUT_SEC; do
     local setting_value="${!setting_name}"
     if ! validate_no_newline "$setting_value" || ! validate_positive_int "$setting_value"; then
       echo "Ungültiger Wert für ${setting_name}: ${setting_value}"
@@ -186,10 +188,17 @@ fi
 validate_settings
 prepare_backup_dir
 
+# Verhindert, dass needrestart/apt-listchanges/debconf auf Eingaben warten
+# und dabei dauerhaft den APT/dpkg-Lock halten.
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+export APT_LISTCHANGES_FRONTEND=none
+
 echo "[1/7] Pakete installieren..."
 run_apt "update" update
 # -o Dpkg::Options::="--force-confold" sorgt dafür, dass bestehende Configs nicht kommentarlos überschrieben werden
-DEBIAN_FRONTEND=noninteractive run_apt "installation" install -y -o Dpkg::Options::="--force-confold" unattended-upgrades apt-listchanges needrestart logrotate
+run_apt "installation" install -y -o Dpkg::Options::="--force-confold" unattended-upgrades apt-listchanges needrestart logrotate
 
 echo "[2/7] needrestart & unattended-upgrades konfigurieren..."
 # Services nach Updates automatisch neustarten (verhindert interaktive Prompts)
@@ -264,7 +273,11 @@ logrotate --debug /etc/logrotate.d/unattended-upgrades >/dev/null
 
 echo "[7/7] Testlauf (Dry-Run)..."
 # Zeigt an, welche Pakete kommen würden, installiert aber nichts
-unattended-upgrade --dry-run --verbose || true
+# Mit Timeout, damit ein gehaltener APT-Lock (z.B. durch einen nachgeholten Timer-Lauf)
+# das Skript nicht endlos blockiert. Ein Dry-Run ändert nichts am dpkg-Zustand.
+if ! timeout "${DRYRUN_TIMEOUT_SEC}" unattended-upgrade --dry-run --verbose; then
+  echo "Hinweis: Dry-Run fehlgeschlagen oder nach ${DRYRUN_TIMEOUT_SEC}s abgebrochen (evtl. läuft gerade ein anderer APT-Prozess)."
+fi
 
 echo
 echo "Fertig."
