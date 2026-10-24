@@ -358,7 +358,7 @@ ask_options() {
 
 write_dropin() {
   local tmp_file
-  tmp_file="$(mktemp)"
+  tmp_file="$(umask 077 && mktemp -t ssh-hardening.XXXXXX)"
 
   {
     echo "# Managed by Cloud-Setup ssh-hardening.sh"
