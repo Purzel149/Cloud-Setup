@@ -38,6 +38,29 @@ All scripts are executable. If not: `chmod +x *.sh`.
 Scripts that change the system back up the files they touch to
 `/root/cloud-setup-backups/<script>/<timestamp>/` first.
 
+### Run logs
+
+Every script that changes the system (including `lynis-check.sh` and
+`update-alloy.sh`) records its run:
+
+- The complete output, including error messages, is also written to
+  `/var/log/cloud-setup/<script>-<timestamp>.log` (mode `0600`).
+- Start (with the invoking user) and end (with the exit code) are sent to the
+  system journal with the tag `cloud-setup`.
+
+```bash
+sudo journalctl -t cloud-setup            # who ran what, and when
+sudo ls -lt /var/log/cloud-setup/         # full output of each run
+```
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CLOUD_SETUP_LOG_DIR` | `/var/log/cloud-setup` | Directory for run logs (absolute path) |
+| `CLOUD_SETUP_LOG_RETENTION_DAYS` | `90` | Run logs of the same script older than this are deleted |
+
+Answers typed at interactive prompts are not recorded; only the prompts and the
+script's output are.
+
 ## Usage
 
 ### `ssh-hardening.sh`
