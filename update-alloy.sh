@@ -49,7 +49,7 @@ log_to_journal() {
 }
 
 start_run_log() {
-  local name run_user
+  local name run_user log_dir
   name="$(basename -- "$0" .sh)"
   run_user="${SUDO_USER:-$(id -un)}"
 
@@ -58,12 +58,21 @@ start_run_log() {
     echo "Error: CLOUD_SETUP_LOG_DIR must be an absolute path without '..'." >&2
     exit 1
   fi
+  # Resolve symlinks and only allow subdirectories of /var/log, so a wrong value
+  # (e.g. /etc) neither changes foreign permissions nor creates files there.
+  log_dir="$(readlink -m -- "$CLOUD_SETUP_LOG_DIR")"
+  if [[ "$log_dir" != /var/log/?* ]]; then
+    echo "Error: CLOUD_SETUP_LOG_DIR must be a subdirectory of /var/log." >&2
+    exit 1
+  fi
+  CLOUD_SETUP_LOG_DIR="$log_dir"
   if ! [[ "$CLOUD_SETUP_LOG_RETENTION_DAYS" =~ ^[1-9][0-9]*$ ]]; then
     echo "Error: CLOUD_SETUP_LOG_RETENTION_DAYS must be an integer > 0." >&2
     exit 1
   fi
 
-  install -d -m 0750 "$CLOUD_SETUP_LOG_DIR"
+  # Only create it; the permissions of an existing directory are left unchanged.
+  [[ -d "$CLOUD_SETUP_LOG_DIR" ]] || install -d -m 0750 "$CLOUD_SETUP_LOG_DIR"
   find "$CLOUD_SETUP_LOG_DIR" -maxdepth 1 -type f -name "${name}-*.log" \
     -mtime "+${CLOUD_SETUP_LOG_RETENTION_DAYS}" -delete 2>/dev/null || true
 

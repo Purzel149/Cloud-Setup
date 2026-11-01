@@ -55,7 +55,7 @@ sudo ls -lt /var/log/cloud-setup/         # full output of each run
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `CLOUD_SETUP_LOG_DIR` | `/var/log/cloud-setup` | Directory for run logs (absolute path) |
+| `CLOUD_SETUP_LOG_DIR` | `/var/log/cloud-setup` | Directory for run logs; must be a subdirectory of `/var/log` (symlinks are resolved). An existing directory keeps its permissions |
 | `CLOUD_SETUP_LOG_RETENTION_DAYS` | `90` | Run logs of the same script older than this are deleted |
 
 Answers typed at interactive prompts are not recorded; only the prompts and the

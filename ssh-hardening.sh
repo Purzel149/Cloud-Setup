@@ -128,7 +128,7 @@ log_to_journal() {
 }
 
 start_run_log() {
-  local name run_user
+  local name run_user log_dir
   name="$(basename -- "$0" .sh)"
   run_user="${SUDO_USER:-$(id -un)}"
 
@@ -137,12 +137,21 @@ start_run_log() {
     echo "Fehler: CLOUD_SETUP_LOG_DIR muss ein absoluter Pfad ohne '..' sein." >&2
     exit 1
   fi
+  # Symlinks aufloesen und nur Unterverzeichnisse von /var/log zulassen, damit ein
+  # falscher Wert (z.B. /etc) weder fremde Rechte aendert noch dort Dateien anlegt.
+  log_dir="$(readlink -m -- "$CLOUD_SETUP_LOG_DIR")"
+  if [[ "$log_dir" != /var/log/?* ]]; then
+    echo "Fehler: CLOUD_SETUP_LOG_DIR muss ein Unterverzeichnis von /var/log sein." >&2
+    exit 1
+  fi
+  CLOUD_SETUP_LOG_DIR="$log_dir"
   if ! [[ "$CLOUD_SETUP_LOG_RETENTION_DAYS" =~ ^[1-9][0-9]*$ ]]; then
     echo "Fehler: CLOUD_SETUP_LOG_RETENTION_DAYS muss eine ganze Zahl > 0 sein." >&2
     exit 1
   fi
 
-  install -d -m 0750 "$CLOUD_SETUP_LOG_DIR"
+  # Nur neu anlegen; die Rechte eines bestehenden Verzeichnisses bleiben unveraendert.
+  [[ -d "$CLOUD_SETUP_LOG_DIR" ]] || install -d -m 0750 "$CLOUD_SETUP_LOG_DIR"
   find "$CLOUD_SETUP_LOG_DIR" -maxdepth 1 -type f -name "${name}-*.log" \
     -mtime "+${CLOUD_SETUP_LOG_RETENTION_DAYS}" -delete 2>/dev/null || true
 
