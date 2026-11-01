@@ -115,4 +115,16 @@ jobs:
               ;;
           esac
 
+          run_log="$(sudo find /var/log/cloud-setup -maxdepth 1 -type f \
+            -name "${SCRIPT%.sh}-*.log" -size +0 -print -quit)"
+          [[ -n "$run_log" ]] || {
+            echo "No non-empty run log was written for ${SCRIPT}." >&2
+            exit 1
+          }
+          [[ "$(sudo stat -c '%a' "$run_log")" == "600" ]] || {
+            echo "Run log has unexpected permissions: ${run_log}" >&2
+            exit 1
+          }
+          echo "Validated run log: ${run_log}"
+
           echo "Root integration checks passed for ${SCRIPT}."

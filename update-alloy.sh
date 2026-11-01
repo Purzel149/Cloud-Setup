@@ -33,7 +33,77 @@ for arg in "$@"; do
   esac
 done
 
+# Run log: everything this script prints is also written to
+# ${CLOUD_SETUP_LOG_DIR}/<script>-<timestamp>.log (mode 0600).
+# Start and end are sent to the system journal with the tag "cloud-setup":
+#   journalctl -t cloud-setup
+CLOUD_SETUP_LOG_DIR="${CLOUD_SETUP_LOG_DIR:-/var/log/cloud-setup}"
+CLOUD_SETUP_LOG_RETENTION_DAYS="${CLOUD_SETUP_LOG_RETENTION_DAYS:-90}"
+RUN_LOG=""
+RUN_LOG_TEE_PID=""
+
+log_to_journal() {
+  if command -v logger >/dev/null 2>&1; then
+    logger -t cloud-setup -- "$1" || true
+  fi
+}
+
+start_run_log() {
+  local name run_user log_dir
+  name="$(basename -- "$0" .sh)"
+  run_user="${SUDO_USER:-$(id -un)}"
+
+  if [[ "$CLOUD_SETUP_LOG_DIR" != /* || "$CLOUD_SETUP_LOG_DIR" == *..* ||
+        "$CLOUD_SETUP_LOG_DIR" == *$'\n'* || "$CLOUD_SETUP_LOG_DIR" == *$'\r'* ]]; then
+    echo "Error: CLOUD_SETUP_LOG_DIR must be an absolute path without '..'." >&2
+    exit 1
+  fi
+  # Resolve symlinks and only allow subdirectories of /var/log, so a wrong value
+  # (e.g. /etc) neither changes foreign permissions nor creates files there.
+  log_dir="$(readlink -m -- "$CLOUD_SETUP_LOG_DIR")"
+  if [[ "$log_dir" != /var/log/?* ]]; then
+    echo "Error: CLOUD_SETUP_LOG_DIR must be a subdirectory of /var/log." >&2
+    exit 1
+  fi
+  CLOUD_SETUP_LOG_DIR="$log_dir"
+  if ! [[ "$CLOUD_SETUP_LOG_RETENTION_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: CLOUD_SETUP_LOG_RETENTION_DAYS must be an integer > 0." >&2
+    exit 1
+  fi
+
+  # Only create it; the permissions of an existing directory are left unchanged.
+  [[ -d "$CLOUD_SETUP_LOG_DIR" ]] || install -d -m 0750 "$CLOUD_SETUP_LOG_DIR"
+  find "$CLOUD_SETUP_LOG_DIR" -maxdepth 1 -type f -name "${name}-*.log" \
+    -mtime "+${CLOUD_SETUP_LOG_RETENTION_DAYS}" -delete 2>/dev/null || true
+
+  RUN_LOG="${CLOUD_SETUP_LOG_DIR}/${name}-$(date +%Y%m%d-%H%M%S).log"
+  (umask 077 && : > "$RUN_LOG")
+  exec > >(tee -a -- "$RUN_LOG") 2>&1
+  RUN_LOG_TEE_PID=$!
+  trap 'finish_run_log $?' EXIT
+
+  echo "Cloud-Setup ${name} | $(date --iso-8601=seconds) | User: ${run_user} | Host: $(hostname)"
+  log_to_journal "${name}: started by ${run_user}, run log: ${RUN_LOG}"
+}
+
+finish_run_log() {
+  local status="$1" name _
+  name="$(basename -- "$0" .sh)"
+  echo "Run log: ${RUN_LOG} (exit code ${status})"
+  log_to_journal "${name}: finished with exit code ${status}"
+
+  # Close the pipe and briefly wait for tee so the last lines reach the log.
+  exec >&- 2>&-
+  if [[ -n "$RUN_LOG_TEE_PID" ]]; then
+    for _ in {1..50}; do
+      kill -0 "$RUN_LOG_TEE_PID" 2>/dev/null || break
+      sleep 0.1
+    done
+  fi
+}
+
 [[ ${EUID} -eq 0 ]] || die "run this script as root (sudo)."
+start_run_log
 
 if (( $# == 0 )); then
   cat <<'EOF'
